@@ -1,5 +1,6 @@
 #include <row.h>
-#include <string>
+#include <sstream>
+#include <cassert>
 
 void UserInfo::serialize(void* destination) {
     // serialize id
@@ -43,4 +44,23 @@ std::string UserInfo::to_string() {
     return std::to_string(id) + ',' +
         std::string(username) + ',' +
         std::string(email);
+}
+
+// str if of the form
+// 1 alice alice@333.com
+void UserInfo::from_string(const std::string &str) {
+    std::stringstream oin(str);
+    int field1;
+    std::string field2;
+    std::string field3;
+
+    oin >> field1 >> field2 >> field3;
+
+    id = field1;
+
+    assert(field2.size() < COL_USERNAME_SIZE);
+    assert(field3.size() < COL_EMAIL_SIZE);
+    
+    strcpy(username, field2.c_str());
+    strcpy(email, field3.c_str());
 }

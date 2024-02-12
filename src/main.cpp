@@ -1,9 +1,9 @@
 #include <iostream>
 #include <string>
 #include <cstdlib>
-#include <command/command.h>
-#include <command/row.h>
-#include <command/table.h>
+#include <core/command.h>
+#include <core/row.h>
+#include <core/table.h>
 
 using std::cin;
 using std::cout;
@@ -32,33 +32,36 @@ void prompt() {
 //     free(mem);
 // }
 
-void test_table() {
-    std::string user = "elice";
-    std::string email = "elice@google.com";
+// void test_table() {
+//     std::string user = "elice";
+//     std::string email = "elice@google.com";
 
-    UserInfo row(13, user.c_str(), email.c_str());
+//     UserInfo row(13, user.c_str(), email.c_str());
 
-    Table tab(row.get_row_byte());
+//     Table tab(row.get_row_byte());
 
-    cout << "start" << endl;
-    int stride = 500;
-    for (int i=0; i < 5; ++i) {
-        void * slot = tab.get_row_slot(i*stride);
-        row.serialize(slot);
-    }
+//     cout << "start" << endl;
+//     int stride = 500;
+//     for (int i=0; i < 5; ++i) {
+//         void * slot = tab.get_row_slot(i*stride);
+//         row.serialize(slot);
+//     }
 
-    UserInfo row_new;
-    for (int i=0; i < 5; ++i) {
-        void * slot = tab.get_row_slot(i*stride);
-        row_new.deserialize(slot);
-        cout << row_new.to_string() << endl;
-    }
-}
+//     UserInfo row_new;
+//     for (int i=0; i < 5; ++i) {
+//         void * slot = tab.get_row_slot(i*stride);
+//         row_new.deserialize(slot);
+//         cout << row_new.to_string() << endl;
+//     }
+// }
 
 
 int main(int argc, char* argv[]) {
     // test_row();
-    test_table();
+    // test_table();
+    // initalize
+    TableBuffer::row_size = UserInfo().get_row_byte();
+    TableBuffer::path = "/tmp/userinfo";
 
     while (true) {
         prompt();
@@ -71,7 +74,7 @@ int main(int argc, char* argv[]) {
         if (query != nullptr) {
             void * result = query->evaluate();
             delete query;
-        } 
+        }
         // parse command
         // if (cmd == ".exit") {
         //     exit(EXIT_SUCCESS);

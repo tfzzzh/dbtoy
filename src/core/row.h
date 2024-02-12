@@ -4,37 +4,44 @@
 
 /**
  * @brief interface for row of the database
- * 
+ *
  */
 class Row {
 public:
     /**
      * @brief serialize content of the row to destination
-     * 
-     * @param destination pointer to a storage 
+     *
+     * @param destination pointer to a storage
      */
     virtual void serialize(void* destination) = 0;
 
     /**
      * @brief deserialize content from the storage
-     * 
+     *
      * @param destination pointer to storage
      */
     virtual void deserialize(void* destination) = 0;
 
     /**
      * @brief return number of bytes needed to store the row
-     * 
-     * @return int 
+     *
+     * @return int
      */
     virtual int get_row_byte() {return 0;}
 
     /**
      * @brief display the content of row
-     * 
-     * @return std::string 
+     *
+     * @return std::string
      */
     virtual std::string to_string() = 0;
+
+    /**
+     * @brief fill content of a row from string
+     *
+     * @param str
+     */
+    virtual void from_string(const std::string & str) = 0;
 
     virtual ~Row() {};
 };
@@ -44,8 +51,8 @@ const int COL_EMAIL_SIZE = 32;
 class UserInfo : public Row {
 public:
     UserInfo(
-        int id = 0, 
-        const char * user = nullptr, 
+        int id = 0,
+        const char * user = nullptr,
         const char * mail = nullptr
     ): id(id) {
         if (user != nullptr)
@@ -65,6 +72,8 @@ public:
     }
 
     virtual std::string to_string() override;
+
+    virtual void from_string(const std::string &str) override;
 
 private:
     int id;

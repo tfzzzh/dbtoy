@@ -4,10 +4,10 @@ project(dbtoy)
 # add_subdirectory(division)
 # set(SOURCE_FILES main.cpp)
 
-add_subdirectory("command")
+add_subdirectory("core")
 add_executable(dbtoy main.cpp)
 
 
-target_link_libraries(dbtoy cmd row table)
+target_link_libraries(dbtoy core)
 target_include_directories(dbtoy PUBLIC ${PROJECT_SOURCE_DIR})
 # target_include_directories(dbtoy PUBLIC "./command")
