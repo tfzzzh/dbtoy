@@ -1,4 +1,4 @@
-#include "core/parameters.h"
+#include <core/parameters.h>
 #include <core/dbfile.h>
 #include <gtest/gtest.h>
 #include <core/row.h>
@@ -122,6 +122,12 @@ TEST(DbFile, read_write_page) {
 }
 
 TEST(Table, read_and_write_row) {
+  int fd = open(
+    "/tmp/table",
+    O_WRONLY | O_CREAT | O_TRUNC,
+    S_IWUSR | S_IRUSR
+  );
+  close(fd);
 
   std::string user = "elice";
   std::string email = "elice@google.com";
@@ -129,12 +135,14 @@ TEST(Table, read_and_write_row) {
   UserInfo row(13, user.c_str(), email.c_str());
   Table * tab = new Table(row.get_row_byte(), "/tmp/table");
 
+  size_t num_row_exist = tab->num_rows;
   for (int i=0; i < 5000; ++i) {
-    void * slot = tab->get_row_slot(i);
+    void * slot = tab->get_row_slot(i + num_row_exist);
     row.serialize(slot);
     tab->num_rows += 1;
   }
 
+  printf("num of rows: %ld\n", tab->num_rows);
   delete tab;
 
   UserInfo newrow;
@@ -148,4 +156,5 @@ TEST(Table, read_and_write_row) {
     );
   }
   delete tab;
+  // printf("table read and checked\n");
 }

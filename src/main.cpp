@@ -4,6 +4,7 @@
 #include <core/command.h>
 #include <core/row.h>
 #include <core/table.h>
+#include <core/btree.h>
 
 using std::cin;
 using std::cout;
@@ -57,11 +58,11 @@ void prompt() {
 
 
 int main(int argc, char* argv[]) {
-    // test_row();
-    // test_table();
-    // initalize
     TableBuffer::row_size = UserInfo().get_row_byte();
     TableBuffer::path = "/tmp/userinfo";
+
+    LeafNode lnode(TableBuffer::row_size);
+    lnode.print_constants();
 
     while (true) {
         prompt();

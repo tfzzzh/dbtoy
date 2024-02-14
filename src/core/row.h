@@ -57,9 +57,13 @@ public:
     ): id(id) {
         if (user != nullptr)
             strcpy(username, user);
+        else
+            username[0] = '\0';
 
         if (mail != nullptr)
             strcpy(email, mail);
+        else
+            email[0] = '\0';
     }
 
     virtual void serialize(void* destination) override;
