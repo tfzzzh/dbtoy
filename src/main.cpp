@@ -61,8 +61,14 @@ int main(int argc, char* argv[]) {
     TableBuffer::row_size = UserInfo().get_row_byte();
     TableBuffer::path = "/tmp/userinfo";
 
-    LeafNode lnode(TableBuffer::row_size);
-    lnode.print_constants();
+    // InternalNode inner;
+    // for (int i=0; i < inner.num_max_keys; ++i) {
+    //     inner.get_key(i) = i;
+    //     inner.set_child(i, nullptr);
+    //     inner.num_keys += 1;
+    // }
+    // inner.set_child(inner.num_max_keys, nullptr);
+    // inner.print_node();
 
     while (true) {
         prompt();
