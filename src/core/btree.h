@@ -1,5 +1,7 @@
 #include "parameters.h"
 #include "row.h"
+#include <_types/_uint32_t.h>
+#include <_types/_uint64_t.h>
 #include <cstdlib>
 #include <cstdio>
 #include <cassert>
@@ -349,10 +351,13 @@ struct InternalNode : BtreeNode {
     uint32_t num_max_keys; // init to even
 
 
-    InternalNode(void * page): BtreeNode(page) {
-        // set node type
-        *((uint8_t*)((char *)data + NODE_TYPE_OFFSET)) =
-            NODE_TYPE_INNER;
+    InternalNode(void * page, bool reset=false): BtreeNode(page) {
+        if (reset) {
+            // set node type
+            *((uint8_t*)((char *)data + NODE_TYPE_OFFSET)) =
+                NODE_TYPE_INNER;
+            num_keys() = 0;
+        }
 
         // set num of max keys
         // since data loading is of form (p0,k0,p1,k1...,pn-1,kn-1,pn)
@@ -360,8 +365,6 @@ struct InternalNode : BtreeNode {
         uint32_t max_num_cell = (payload_size - INTERNAL_NODE_CHILD_SIZE) /
             (INTERNAL_NODE_CHILD_SIZE + INTERNAL_NODE_KEY_SIZE);
         num_max_keys = max_num_cell % 2 ? max_num_cell - 1 : max_num_cell;
-
-        num_keys() = 0;
     }
 
     uint32_t &num_keys() { // must init !!
@@ -408,6 +411,184 @@ struct InternalNode : BtreeNode {
     //     *((int64_t *) pos) = page_id;
     // }
 
+
+    /**
+     * @brief insert (left_ptr, key, right_ptr) into current node
+     *   assumption: current node is not full
+     * @param key
+     * @param left page id of left node, assume that all keys in left tree <= key
+     * @param right page id of right node. assume all key in right tree > key
+     */
+    void insert(uint32_t key, uint64_t left, uint64_t right) {
+        int n = num_keys();
+        num_keys() += 1;
+
+        // when current page is empty we shall insert key, left and right
+        // into first position
+        if (n == 0) {
+            get_child(0) = left;
+            get_key(0) = key;
+            get_child(1) = right;
+
+        } else {
+            printf("key=%d\n", key);
+            int i = n-1;
+            while (i >= 0 && get_key(i) >= key) {
+                assert(get_key(i) != key); // key not duplicate
+
+                // move (key_i, child_{i+1}) to right position
+                get_key(i+1) = get_key(i);
+                get_child(i+2) = get_child(i+1);
+                i -= 1;
+            }
+
+            // when i == -1 => key < get_key(0)
+            // insert (left, key, right) to (c0, k0, c1, k1)
+            // -> (c0, key, right, k0, c1, k1)
+            // i == -1 or get_key(i) < key
+            get_key(i+1) = key;
+            get_child(i+2) = right;
+
+            assert(get_child(i+1) == left);
+        }
+    }
+
+    /**
+     * @brief when internal node is full. insert (left, key, right) will overflow the page
+     *  into p1' (size: n/2) (p1', key', p2') p2' (size: n/2)
+     *  (p1', key', p2') will insert to upper level
+     *  p1' is the id of current page and p2' is the id of newly allocated page
+     * @param key
+     * @param left page id of the left child
+     * @param right page id of the right child
+     * @param new_page
+     * @return uint32_t
+     */
+    uint32_t insert_and_split(uint32_t key, uint64_t left, uint64_t right, void * new_page) {
+        // interprete new page as a new inner node
+        InternalNode rightNode(new_page, true);
+
+        // allocate n/2 new entries in right node
+        assert(isFull());
+        int n = num_keys();
+        rightNode.num_keys() = n / 2;
+
+        // locate the position to insert current key
+        int key_pos;
+        bool success = search_insert_location(key, key_pos);
+        assert(success);
+        // printf("key_pos = %d\n", key_pos);
+
+        // move old key & its right child to right position
+        // node that pivot is put to idx == n / 2 of current node
+        // the pivot's right child shall at be the first child
+        // of the right node
+        // for each move only (key, rightchild) is moved
+        int left_load = n / 2 + 1, right_load = n / 2;
+        int pivot_pos = n / 2; // at left_node
+        for (int i=n-1; i >=0; --i) {
+            // if i < key_pos it shall locate at i
+            // if i >= key_pos its location becomes i+1
+            // since key_pos shall occupied by the new key
+            int idx = i + (key_pos <= i);
+
+            // insert to left node with new id: idx
+            // when idx == pivot_pos, its rchild shall
+            // move to the start pos of right child
+            if (idx == pivot_pos) {
+                // move right child
+                rightNode.get_child(0) = get_child(i+1);
+
+                // when idx == i+1 one shall move its key
+                if (idx != i) {
+                    get_key(idx) = get_key(i);
+                }
+
+            } else if (idx < left_load) {
+                // idx == i + 1, move key and rightchild
+                if (i != idx) {
+                    get_key(idx) = get_key(i);
+                    get_child(idx+1) = get_child(i+1);
+                }
+
+            // insert to right node
+            } else {
+                rightNode.get_key(idx-left_load) = get_key(i);
+                rightNode.get_child(idx-left_load+1) = get_child(i+1);
+            }
+        }
+
+        // insert new key to key_pos
+        // special case: key_pos is pivot
+        if (key_pos < left_load) {
+            get_key(key_pos) = key;
+
+            if (key_pos == pivot_pos) {
+                rightNode.get_child(0) = right;
+            } else {
+                get_child(key_pos+1) = right;
+            }
+
+            // assert left
+            assert(get_child(key_pos) == left);
+        } else {
+            rightNode.get_key(key_pos - left_load) = key;
+            rightNode.get_child(key_pos - left_load + 1) = right;
+            assert(rightNode.get_child(key_pos-left_load) == left);
+        }
+
+        // remove tail elements of current node
+        uint32_t pivot_key = get_key(pivot_pos);
+        num_keys() = n / 2;
+
+        // return the pivot of these keys which is
+        // of rank n / 2
+        return pivot_key;
+    }
+
+    /**
+     * @brief search position before which the key shall insert
+     * (not test yet)
+     * @param key
+     * @param pos
+     * @return true: position found
+     * @return false: search failed, duplicate found. in this
+     *  circumstoms pos is set to the index of key
+     */
+    bool search_insert_location(uint32_t key, int & pos) {
+        int start = 0, end = num_keys() - 1;
+        while (start <= end) {
+            int mid = start + (end-start) / 2;
+            uint32_t key_mid = get_key(mid);
+
+            if (key_mid == key) {
+                pos = mid;
+                // duplicated key
+                return false;
+
+            // key[start .. mid] < key
+            } else if (key_mid < key) {
+                start = mid + 1;
+
+            // key < key_mid
+            } else {
+                end = mid - 1;
+            }
+        }
+
+        // success start > end
+        // key shall inserted as follow:
+        // end _   start
+        // _   key _
+        assert(start == end + 1);
+        pos = start;
+
+        return true;
+    }
+
+    bool isFull() {
+        return num_keys() == num_max_keys;
+    }
 
     void print_node() {
         printf("inner node (size %d)\n", num_keys());

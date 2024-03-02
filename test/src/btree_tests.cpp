@@ -144,3 +144,115 @@ TEST(btree, insert_full_leaf_node) {
     free(rpage);
     free(page);
 }
+
+
+TEST(btree, insert_inner_node) {
+    // suppose the key ptr sequence is of form
+    // (0',0,1',1,2',2,3',4,4',5,5')
+    // key seq: (2, 5, 1, 3, 4, 0)
+    // insert 2: (p0, 2, p1)
+    // insert 5: (p1, 5, p2) -> (p0, 2, p1, 5, p2)
+    // insert 1: (p0, 1, p3) -> (p0, 1, p3, 2, p1, 5, p2)
+    // insert 3: (p1, 3, p4) -> (p0, 1, p3, 2, p1, 3, p4, 5, p2)
+    // insert 4: (p4, 4, p5) -> (p0, 1, p3, 2, p1, 3, p4, 4, p5, 5, p2)
+    // insert 0: (p0, 0, p6) -> (p0, 0, p6, 1, p3, 2, p1, 3, p4, 4, p5, 5, p2)
+    void * page = malloc(PAGE_SIZE);
+    InternalNode node(page, true);
+    node.insert(2, 0, 1);
+    node.insert(5, 1, 2);
+    node.insert(1, 0, 3);
+    node.insert(3, 1, 4);
+    node.insert(4, 4, 5);
+    node.insert(0, 0, 6);
+
+    EXPECT_EQ(node.num_keys(), 6);
+    int correct_pages[7] = {0,6,3,1,4,5,2};
+    for (int i=0; i < 6; ++i) {
+        EXPECT_EQ(node.get_key(i), i);
+        EXPECT_EQ(node.get_child(i), correct_pages[i]);
+    }
+    EXPECT_EQ(node.get_child(6), correct_pages[6]);
+    free(page);
+}
+
+TEST(btree, search_insert_location_fail) {
+    void * page = malloc(PAGE_SIZE);
+
+    InternalNode node(page, true);
+    node.num_keys() = node.num_max_keys;
+    for (int i=0; i < node.num_keys(); ++i) {
+        node.get_key(i) = i;
+    }
+
+    for (int i=0; i < node.num_max_keys; ++i) {
+        int pos;
+        bool success = node.search_insert_location(i, pos);
+        EXPECT_FALSE(success);
+        EXPECT_EQ(pos, i);
+    }
+
+    free(page);
+}
+
+TEST(btree, insert_and_split) {
+    void * page = malloc(PAGE_SIZE);
+
+    // build a full node with key = 3k+1
+    // lchild k, rchild k+1
+    InternalNode lnode(page, true);
+    lnode.num_keys() = lnode.num_max_keys;
+    for (int i=0; i < lnode.num_max_keys; ++i) {
+        lnode.get_child(i) = i;
+        lnode.get_key(i) = 3 * i + 1;
+    }
+    lnode.get_child(lnode.num_max_keys) = lnode.num_max_keys;
+
+    // insert 3*k to 0-th ... num_max_keys position
+    void * page_backup = malloc(PAGE_SIZE);
+    void * new_page = malloc(PAGE_SIZE);
+    memcpy(page_backup, page, PAGE_SIZE);
+    for (int i=0; i <= lnode.num_max_keys; ++i) {
+        uint32_t new_key = 3 * i;
+        uint64_t left = lnode.get_child(i);
+        uint64_t right = lnode.num_max_keys + 1;
+
+        uint32_t pivot = lnode.insert_and_split(new_key, left, right, new_page);
+
+        // now the keys becomes (1, 4 ... 3*i-1 .. 3*i ... 3*i+1)
+        if (i == lnode.num_max_keys / 2)
+            EXPECT_EQ(new_key, pivot);
+        else if (i < lnode.num_max_keys / 2)
+            EXPECT_EQ(3*(lnode.num_max_keys/2-1)+1, pivot);
+        else
+            EXPECT_EQ(3*lnode.num_max_keys/2+1, pivot);
+
+        // check keys
+        InternalNode rNode(new_page, false);
+        EXPECT_EQ(lnode.num_keys(), lnode.num_max_keys/2);
+        EXPECT_EQ(rNode.num_keys(), lnode.num_max_keys/2);
+        for (int j=0; j < lnode.num_keys(); ++j) {
+            if (j < i) {
+                EXPECT_EQ(lnode.get_key(j), 3*j+1);
+            } else if (j > i) {
+                EXPECT_EQ(lnode.get_key(j), 3*(j-1)+1);
+            }
+        }
+
+        for (int j=0; j < rNode.num_keys(); ++j) {
+            int idx = j + lnode.num_max_keys / 2 + 1;
+            if (idx < i) {
+                EXPECT_EQ(rNode.get_key(j), 3*idx+1);
+            } else if(idx > i) {
+                EXPECT_EQ(rNode.get_key(j), 3*(idx-1)+1);
+            }
+        }
+
+        memcpy(lnode.data, page_backup, PAGE_SIZE);
+        lnode.num_keys() = lnode.num_max_keys;
+        // break;
+    }
+
+    free(new_page);
+    free(page_backup);
+    free(page);
+}
