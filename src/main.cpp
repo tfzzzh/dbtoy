@@ -1,3 +1,4 @@
+#include "core/parameters.h"
 #include <iostream>
 #include <string>
 #include <cstdlib>
@@ -61,7 +62,9 @@ int main(int argc, char* argv[]) {
     TableBuffer::row_size = UserInfo().get_row_byte();
     TableBuffer::path = "/tmp/userinfo";
 
-    // InternalNode inner;
+    // auto page_ptr = malloc(PAGE_SIZE);
+    // InternalNode inner(page_ptr, true);
+    // cout << "max_num_keys: " << inner.num_max_keys << endl;
     // for (int i=0; i < inner.num_max_keys; ++i) {
     //     inner.get_key(i) = i;
     //     inner.set_child(i, nullptr);

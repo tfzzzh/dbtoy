@@ -8,7 +8,8 @@ enable_testing()
 add_executable(
   hello_test
   "src/start_tests.cpp"
-  "src/btree_tests.cpp"
+  "src/btree_node_tests.cpp"
+  "src/btreepager_tests.cpp"
 )
 target_link_libraries(
   hello_test

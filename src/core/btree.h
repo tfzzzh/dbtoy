@@ -1,12 +1,17 @@
-#include "parameters.h"
-#include "row.h"
+#include <cassert>
+#include <climits>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <exception>
+#include <memory>
+#include <stdexcept>
 #include <_types/_uint32_t.h>
 #include <_types/_uint64_t.h>
-#include <cstdlib>
-#include <cstdio>
-#include <cassert>
-#include <cstring>
 #include <sys/_types/_int64_t.h>
+#include "dbfile.h"
+#include "parameters.h"
+#include "row.h"
 
 /**
  * @brief common header layer out
@@ -18,16 +23,17 @@ const uint32_t NODE_TYPE_SIZE = sizeof(uint8_t);
 const uint32_t NODE_TYPE_OFFSET = 0;
 const uint32_t IS_ROOT_SIZE = sizeof(uint8_t);
 const uint32_t IS_ROOT_OFFSET = NODE_TYPE_SIZE;
-const uint32_t PARENT_POINTER_SIZE = sizeof(int64_t);
+const uint32_t PARENT_POINTER_SIZE = sizeof(uint64_t);
 const uint32_t PARENT_POINTER_OFFSET = IS_ROOT_OFFSET + IS_ROOT_SIZE;
-const uint32_t COMMON_NODE_HEADER_SIZE =
-    NODE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_POINTER_SIZE;
-const int64_t NODE_PARENT_INVALID = -1;
+const uint32_t COMMON_NODE_HEADER_SIZE = NODE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_POINTER_SIZE;
+const uint64_t NODE_PARENT_INVALID = ULONG_LONG_MAX;
 
-struct BtreeNode {
+struct BtreeNode
+{
     void * data; // pointer to a page
 
-    BtreeNode(void * page): data(page) {
+    BtreeNode(void * page) : data(page)
+    {
         // the page shall known
         // data = malloc(PAGE_SIZE);
 
@@ -38,30 +44,85 @@ struct BtreeNode {
         // parent() = NODE_PARENT_INVALID;
     }
 
-    const uint8_t & node_type() const {
-        const uint8_t & value = *((uint8_t*)((char *)data + NODE_TYPE_OFFSET));
+    virtual const uint8_t & node_type() const
+    {
+        const uint8_t & value = *((uint8_t *)((char *)data + NODE_TYPE_OFFSET));
         return value;
     }
 
-    bool is_root() const {
-        bool result = *(
-            (char *) data + IS_ROOT_OFFSET
-        );
+    virtual bool is_root() const
+    {
+        bool result = *((char *)data + IS_ROOT_OFFSET);
         return result;
     }
 
-    void set_root(bool is_root=true) {
-        *(
-            (char *) data + IS_ROOT_OFFSET
-        ) = (int) is_root;
-
-    }
+    virtual void set_root(bool is_root = true) { *((char *)data + IS_ROOT_OFFSET) = (int)is_root; }
 
     // when current node's parent is not valid set it to -1
-    int64_t & parent() {
-        return *(int64_t *) ((char *) data + PARENT_POINTER_OFFSET);
+    virtual uint64_t & parent() { return *(uint64_t *)((char *)data + PARENT_POINTER_OFFSET); }
+
+    // get and set load of current node
+    virtual uint32_t get_node_load() const { throw std::runtime_error("not implemented"); }
+
+    virtual void set_node_load(uint32_t size) { throw std::runtime_error("not implemented"); }
+
+    // get number of keys for a node
+    virtual uint32_t get_num_keys() const { throw std::runtime_error("not implemented"); }
+
+    // get key according to its id, one can use this
+    // function to change key value
+    virtual uint32_t & get_key(uint32_t key_id) { throw std::runtime_error("not implemented"); }
+
+    // check whether current node is full
+    virtual bool isFull() { throw std::runtime_error("not implemented"); }
+
+    // search pos s.t. keys[pos] <= query_key < keys[pos+1]
+    // pos == -1 if query_key < keys[0]
+    // assumption: all keys in a nodes are distinct
+    virtual int search_key_position(uint32_t key)
+    {
+        uint32_t n = get_num_keys();
+        assert(n > 0);
+
+        int start = 0, end = n - 1;
+        while (start <= end)
+        {
+            int mid = start + (end - start) / 2;
+            uint32_t key_mid = get_key(mid);
+
+            if (key_mid == key)
+                return mid;
+            // key[start .. mid] < key
+            else if (key_mid < key)
+                start = mid + 1;
+            // key < key_mid
+            else
+                end = mid - 1;
+        }
+
+        // keys[end] < key < keys[start]
+        assert(start == end + 1);
+        return end;
     }
 
+    // check if the node contains duplicate keys
+    virtual bool contain_duplicate()
+    {
+        uint32_t n = get_num_keys();
+
+        for (uint32_t i = 0; i + 1 < n; ++i)
+            if (get_key(i) == get_key(i + 1))
+                return true;
+
+        return false;
+    }
+
+    // static functions
+    static uint8_t get_node_type_from(void * page)
+    {
+        const uint8_t & value = *((uint8_t *)((char *)page + NODE_TYPE_OFFSET));
+        return value;
+    }
     // virtual ~BtreeNode() {
     //     free(data);
     // }
@@ -75,10 +136,8 @@ struct BtreeNode {
 const uint32_t LEAF_NODE_NUM_CELLS_SIZE = sizeof(uint32_t);
 const uint32_t LEAF_NODE_NUM_CELLS_OFFSET = COMMON_NODE_HEADER_SIZE;
 const uint32_t LEAF_NODE_ROWSIZE_SIZE = sizeof(uint32_t);
-const uint32_t LEAF_NODE_ROWSIZE_OFFSET = LEAF_NODE_NUM_CELLS_OFFSET +
-    LEAF_NODE_NUM_CELLS_SIZE;
-const uint32_t LEAF_NODE_HEADER_SIZE =
-    COMMON_NODE_HEADER_SIZE + LEAF_NODE_NUM_CELLS_SIZE + LEAF_NODE_ROWSIZE_SIZE;
+const uint32_t LEAF_NODE_ROWSIZE_OFFSET = LEAF_NODE_NUM_CELLS_OFFSET + LEAF_NODE_NUM_CELLS_SIZE;
+const uint32_t LEAF_NODE_HEADER_SIZE = COMMON_NODE_HEADER_SIZE + LEAF_NODE_NUM_CELLS_SIZE + LEAF_NODE_ROWSIZE_SIZE;
 
 /**
  * @brief layout of payload (key, value)
@@ -86,8 +145,7 @@ const uint32_t LEAF_NODE_HEADER_SIZE =
  */
 const uint32_t LEAF_NODE_KEY_SIZE = sizeof(uint32_t);
 const uint32_t LEAF_NODE_KEY_OFFSET = 0;
-const uint32_t LEAF_NODE_VALUE_OFFSET =
-    LEAF_NODE_KEY_OFFSET + LEAF_NODE_KEY_SIZE;
+const uint32_t LEAF_NODE_VALUE_OFFSET = LEAF_NODE_KEY_OFFSET + LEAF_NODE_KEY_SIZE;
 const uint32_t LEAF_NODE_SPACE_FOR_CELLS = PAGE_SIZE - LEAF_NODE_HEADER_SIZE;
 
 const uint8_t NODE_TYPE_INNER = 0;
@@ -98,15 +156,16 @@ const uint8_t NODE_TYPE_LEAF = 1;
  * @brief leafnode of b+tree
  *
  */
-struct LeafNode : BtreeNode{
+struct LeafNode : public BtreeNode
+{
     uint32_t row_size; // size of a row
     uint32_t cell_size; // concate of key and row
     uint32_t num_max_cell; // shall never change them
 
-    LeafNode(void * page, uint32_t row_size):
-        BtreeNode(page),row_size(row_size){
+    LeafNode(void * page, uint32_t row_size) : BtreeNode(page), row_size(row_size)
+    {
         cell_size = sizeof(uint32_t) + row_size;
-        num_max_cell =  LEAF_NODE_SPACE_FOR_CELLS / cell_size;
+        num_max_cell = LEAF_NODE_SPACE_FOR_CELLS / cell_size;
 
         // enforce that the load of tree is even
         if (num_max_cell % 2 == 1)
@@ -118,19 +177,19 @@ struct LeafNode : BtreeNode{
         assert(num_max_cell > 0);
 
         // set node type
-        *((uint8_t*)((char *)data + NODE_TYPE_OFFSET)) =
-            NODE_TYPE_LEAF;
+        *((uint8_t *)((char *)data + NODE_TYPE_OFFSET)) = NODE_TYPE_LEAF;
 
         // set row size
         *get_rowsize_ptr() = row_size;
     }
 
     // build node directly from page
-    LeafNode(void * page): BtreeNode(page) {
+    LeafNode(void * page) : BtreeNode(page)
+    {
         row_size = *get_rowsize_ptr();
 
         cell_size = sizeof(uint32_t) + row_size;
-        num_max_cell =  LEAF_NODE_SPACE_FOR_CELLS / cell_size;
+        num_max_cell = LEAF_NODE_SPACE_FOR_CELLS / cell_size;
 
         // enforce that the load of tree is even
         if (num_max_cell % 2 == 1)
@@ -139,73 +198,85 @@ struct LeafNode : BtreeNode{
         assert(num_max_cell > 0);
     }
 
-    // get pointer to row_size
-    uint32_t * get_rowsize_ptr() {
-        return (uint32_t *) ((char *) data + LEAF_NODE_ROWSIZE_OFFSET);
+    virtual uint32_t get_node_load() const override { return num_max_cell; }
+
+    virtual void set_node_load(uint32_t size) override
+    {
+        assert(size % 2 == 0 && size > 0);
+        num_max_cell = size;
     }
+
+    virtual uint32_t get_num_keys() const override
+    {
+        uint32_t * num_cells_ptr = (uint32_t *)((char *)data + (size_t)LEAF_NODE_NUM_CELLS_OFFSET);
+        return *num_cells_ptr;
+    }
+
+    // get pointer to row_size
+    uint32_t * get_rowsize_ptr() { return (uint32_t *)((char *)data + LEAF_NODE_ROWSIZE_OFFSET); }
 
     // num of (key, value) pairs
     // note that :: add num_cells by one when new row inserted
-    uint32_t & num_cells() {
-        uint32_t * num_cells_ptr = (uint32_t *)
-            ((char *) data + (size_t) LEAF_NODE_NUM_CELLS_OFFSET);
+    uint32_t & num_cells()
+    {
+        uint32_t * num_cells_ptr = (uint32_t *)((char *)data + (size_t)LEAF_NODE_NUM_CELLS_OFFSET);
         return *num_cells_ptr;
     }
 
     // pair of (key, val)
     // cell_num < leaf_node_num_cells
-    void* get_cell(uint32_t cell_num) {
+    void * get_cell(uint32_t cell_num)
+    {
         assert(cell_num < num_cells());
-        return (char *) data + LEAF_NODE_HEADER_SIZE + cell_num * cell_size;
+        return (char *)data + LEAF_NODE_HEADER_SIZE + cell_num * cell_size;
     }
 
     // allocate new cell from the page
     // when no slot available return nullptr
-    void* allocate_cell() {
+    void * allocate_cell()
+    {
         uint32_t m = num_cells();
-        if (m == num_max_cell) return nullptr;
+        if (m == num_max_cell)
+            return nullptr;
 
-        void * pos = (char *) data + LEAF_NODE_HEADER_SIZE + m * cell_size;
+        void * pos = (char *)data + LEAF_NODE_HEADER_SIZE + m * cell_size;
 
         num_cells() += 1;
         return pos;
     }
 
     // get key of a cell
-    uint32_t & get_key(uint32_t cell_num) {
-        return *((uint32_t*) get_cell(cell_num));
-    }
+    virtual uint32_t & get_key(uint32_t cell_num) override { return *((uint32_t *)get_cell(cell_num)); }
 
     // pointer to value content, shall deserialize using row object
-    void* get_value(uint32_t cell_num) {
+    void * get_value(uint32_t cell_num)
+    {
         void * cell_ptr = get_cell(cell_num);
-        return (char *) cell_ptr + LEAF_NODE_VALUE_OFFSET;
+        return (char *)cell_ptr + LEAF_NODE_VALUE_OFFSET;
     }
 
-    bool is_duplicate(uint32_t key) {
-        for (uint32_t i=0; i < num_cells(); ++i) {
+    bool is_duplicate(uint32_t key)
+    {
+        for (uint32_t i = 0; i < num_cells(); ++i)
             if (get_key(i) == key)
                 return true;
-        }
         return false;
     }
 
     // duplicate is not checked using this method
     // insert (key, value) into the page make the page sorted by key
-    void insert(uint32_t key, Row * value) {
+    void insert(uint32_t key, Row * value)
+    {
         assert(num_cells() < num_max_cell);
         auto m = num_cells();
 
         // allocate a place for the newly insert row
         allocate_cell();
         auto i = m;
-        while (i >= 1 && get_key(i-1) > key) {
+        while (i >= 1 && get_key(i - 1) > key)
+        {
             // copy cell[i-1] to cell[i]
-            memcpy(
-                get_cell(i),
-                get_cell(i-1),
-                cell_size
-            );
+            memcpy(get_cell(i), get_cell(i - 1), cell_size);
             i -= 1;
         }
 
@@ -217,9 +288,7 @@ struct LeafNode : BtreeNode{
     // static void copy_cell(int cell_id) {
 
     // }
-    bool isFull() {
-        return num_cells() == num_max_cell;
-    }
+    virtual bool isFull() override { return num_cells() == num_max_cell; }
 
     // when current node is overloaded, split it into two
     // node of size (d+1) (d) then move pivot upward
@@ -233,7 +302,8 @@ struct LeafNode : BtreeNode{
      * @param new_page: address of new page which is not used by any node
      * @return uint32_t: pivot key whitch is the max key of left page
      */
-    uint32_t insert_and_split(uint32_t key, Row * value, void * new_page) {
+    uint32_t insert_and_split(uint32_t key, Row * value, void * new_page)
+    {
         // printf("enter\n");
         assert(isFull());
         // set statics of new_page
@@ -244,53 +314,51 @@ struct LeafNode : BtreeNode{
         // printf("start compare, num_cell=%d\n", num_cells());
         int n = num_cells();
         int key_pos = n;
-        while (key_pos > 0 && get_key(key_pos-1) > key)
+        while (key_pos > 0 && get_key(key_pos - 1) > key)
             key_pos -= 1;
         // printf("key_pos=%d\n", key_pos);
         // key_pos == 0 or get_key(key_pos-1) <= key
-        assert(
-            key_pos == 0 && key < get_key(key_pos) ||
-            key_pos > 0 && get_key(key_pos-1) < key
-        );
+        assert(key_pos == 0 && key < get_key(key_pos) || key_pos > 0 && get_key(key_pos - 1) < key);
         // key shall insert at key_pos
         //printf("End compare\n");
 
         // allocate memory in right node
         int left_load = n / 2 + 1, right_load = n / 2;
-        for (int i=0; i < right_load; ++i)
+        for (int i = 0; i < right_load; ++i)
             rightNode.allocate_cell();
 
         // move old key & value pair into
         // left node and right node
-        for (int i=n-1; i >=0; --i) {
+        for (int i = n - 1; i >= 0; --i)
+        {
             int idx = i + (key_pos <= i);
 
             // insert to left node with new id: idx
-            if (idx < left_load) {
+            if (idx < left_load)
+            {
                 // move from i to idx
-                if (i != idx) {
-                    memcpy(get_cell(idx), get_cell(i),
-                     cell_size);
-                }
+                if (i != idx)
+                    memcpy(get_cell(idx), get_cell(i), cell_size);
 
-            // insert to right node
-            } else {
-                memcpy(
-                    rightNode.get_cell(idx-left_load),
-                    get_cell(i),
-                    cell_size
-                );
+                // insert to right node
+            }
+            else
+            {
+                memcpy(rightNode.get_cell(idx - left_load), get_cell(i), cell_size);
             }
         }
         // printf("key inserted\n");
 
         // insert key_pos
-        if (key_pos < left_load) {
+        if (key_pos < left_load)
+        {
             get_key(key_pos) = key_pos;
             value->serialize(get_value(key_pos));
-        } else {
+        }
+        else
+        {
             rightNode.get_key(key_pos - left_load) = key_pos;
-            value->serialize(rightNode.get_value(key_pos-left_load));
+            value->serialize(rightNode.get_value(key_pos - left_load));
         }
 
         // addjust left node size to left_load
@@ -299,7 +367,7 @@ struct LeafNode : BtreeNode{
         return get_key(left_load - 1);
     }
 
-    void initialize_leaf_node(void* node) { num_cells() = 0; }
+    void initialize_leaf_node(void * node) { num_cells() = 0; }
 
     /*
     ROW_SIZE: 68
@@ -309,7 +377,8 @@ struct LeafNode : BtreeNode{
     LEAF_NODE_SPACE_FOR_CELLS: 4082
     LEAF_NODE_MAX_CELLS: 56
     */
-    void print_constants() {
+    void print_constants()
+    {
         printf("ROW_SIZE: %d\n", row_size);
         printf("COMMON_NODE_HEADER_SIZE: %d\n", COMMON_NODE_HEADER_SIZE);
         printf("LEAF_NODE_HEADER_SIZE: %d\n", LEAF_NODE_HEADER_SIZE);
@@ -318,21 +387,19 @@ struct LeafNode : BtreeNode{
         printf("LEAF_NODE_MAX_CELLS: %d\n", num_max_cell);
     }
 
-    void print_node() {
+    void print_node()
+    {
         printf("leaf (size %d)\n", num_cells());
-        for (uint32_t i = 0; i < num_cells(); i++) {
+        for (uint32_t i = 0; i < num_cells(); i++)
+        {
             uint32_t key = get_key(i);
             printf("  - %d : %d\n", i, key);
         }
     }
 
-    inline static uint32_t * extract_key(void * cell){
-        return (uint32_t*) cell;
-    }
+    inline static uint32_t * extract_key(void * cell) { return (uint32_t *)cell; }
 
-    inline static void * extract_value(void * cell){
-        return (char *) cell + LEAF_NODE_VALUE_OFFSET;
-    }
+    inline static void * extract_value(void * cell) { return (char *)cell + LEAF_NODE_VALUE_OFFSET; }
 };
 
 /**
@@ -343,62 +410,77 @@ struct LeafNode : BtreeNode{
  */
 const uint32_t INTERNAL_NODE_NUM_KEYS_SIZE = sizeof(uint32_t);
 const uint32_t INTERNAL_NODE_NUM_KEYS_OFFSET = COMMON_NODE_HEADER_SIZE;
-const uint32_t INTERNAL_NODE_HEADER_SIZE = COMMON_NODE_HEADER_SIZE +
-                                        INTERNAL_NODE_NUM_KEYS_SIZE;
+const uint32_t INTERNAL_NODE_HEADER_SIZE = COMMON_NODE_HEADER_SIZE + INTERNAL_NODE_NUM_KEYS_SIZE;
 const uint32_t INTERNAL_NODE_KEY_SIZE = sizeof(uint32_t);
-const uint32_t INTERNAL_NODE_CHILD_SIZE = sizeof(int64_t);
-struct InternalNode : BtreeNode {
+const uint32_t INTERNAL_NODE_CHILD_SIZE = sizeof(uint64_t);
+struct InternalNode : public BtreeNode
+{
     uint32_t num_max_keys; // init to even
 
 
-    InternalNode(void * page, bool reset=false): BtreeNode(page) {
-        if (reset) {
+    InternalNode(void * page, bool reset = false) : BtreeNode(page)
+    {
+        if (reset)
+        {
             // set node type
-            *((uint8_t*)((char *)data + NODE_TYPE_OFFSET)) =
-                NODE_TYPE_INNER;
+            *((uint8_t *)((char *)data + NODE_TYPE_OFFSET)) = NODE_TYPE_INNER;
             num_keys() = 0;
         }
 
         // set num of max keys
         // since data loading is of form (p0,k0,p1,k1...,pn-1,kn-1,pn)
         uint32_t payload_size = PAGE_SIZE - INTERNAL_NODE_HEADER_SIZE;
-        uint32_t max_num_cell = (payload_size - INTERNAL_NODE_CHILD_SIZE) /
-            (INTERNAL_NODE_CHILD_SIZE + INTERNAL_NODE_KEY_SIZE);
+        uint32_t max_num_cell = (payload_size - INTERNAL_NODE_CHILD_SIZE) / (INTERNAL_NODE_CHILD_SIZE + INTERNAL_NODE_KEY_SIZE);
         num_max_keys = max_num_cell % 2 ? max_num_cell - 1 : max_num_cell;
     }
 
-    uint32_t &num_keys() { // must init !!
+    virtual uint32_t get_node_load() const override { return num_max_keys; }
+
+    virtual void set_node_load(uint32_t size) override
+    {
+        assert(size % 2 == 0 && size > 0);
+        num_max_keys = size;
+    }
+
+    virtual uint32_t get_num_keys() const override
+    {
+        char * pos = (char *)data + INTERNAL_NODE_NUM_KEYS_OFFSET;
+        return *((uint32_t *)pos);
+    }
+
+    uint32_t & num_keys()
+    { // must init !!
         return *num_keys_ptr();
     }
 
     // get number of rows
-    uint32_t * num_keys_ptr() {
-        char * pos = (char *) data + INTERNAL_NODE_NUM_KEYS_OFFSET;
-        return (uint32_t *) pos;
+    uint32_t * num_keys_ptr()
+    {
+        char * pos = (char *)data + INTERNAL_NODE_NUM_KEYS_OFFSET;
+        return (uint32_t *)pos;
     }
 
 
     // get key of a cell
     // key is of form (p0,k0,....)
-    uint32_t & get_key(uint32_t id) {
+    virtual uint32_t & get_key(uint32_t id) override
+    {
         assert(id < num_max_keys);
 
-        char * start = (char *) data + INTERNAL_NODE_HEADER_SIZE;
-        char * pos = start +
-            id * (INTERNAL_NODE_CHILD_SIZE + INTERNAL_NODE_KEY_SIZE) +
-            INTERNAL_NODE_CHILD_SIZE;
+        char * start = (char *)data + INTERNAL_NODE_HEADER_SIZE;
+        char * pos = start + id * (INTERNAL_NODE_CHILD_SIZE + INTERNAL_NODE_KEY_SIZE) + INTERNAL_NODE_CHILD_SIZE;
 
-        return * ((uint32_t *) pos);
+        return *((uint32_t *)pos);
     }
 
     // get value from a cell
-    uint64_t & get_child(uint32_t id) {
+    uint64_t & get_child(uint32_t id)
+    {
         assert(id <= num_max_keys);
-        char * start = (char *) data + INTERNAL_NODE_HEADER_SIZE;
-        char * pos = start +
-            id * (INTERNAL_NODE_CHILD_SIZE + INTERNAL_NODE_KEY_SIZE);
+        char * start = (char *)data + INTERNAL_NODE_HEADER_SIZE;
+        char * pos = start + id * (INTERNAL_NODE_CHILD_SIZE + INTERNAL_NODE_KEY_SIZE);
 
-        return *((uint64_t *) pos);
+        return *((uint64_t *)pos);
     }
 
     // set value of a child
@@ -419,26 +501,30 @@ struct InternalNode : BtreeNode {
      * @param left page id of left node, assume that all keys in left tree <= key
      * @param right page id of right node. assume all key in right tree > key
      */
-    void insert(uint32_t key, uint64_t left, uint64_t right) {
+    void insert(uint32_t key, uint64_t left, uint64_t right)
+    {
         int n = num_keys();
         num_keys() += 1;
 
         // when current page is empty we shall insert key, left and right
         // into first position
-        if (n == 0) {
+        if (n == 0)
+        {
             get_child(0) = left;
             get_key(0) = key;
             get_child(1) = right;
-
-        } else {
+        }
+        else
+        {
             printf("key=%d\n", key);
-            int i = n-1;
-            while (i >= 0 && get_key(i) >= key) {
+            int i = n - 1;
+            while (i >= 0 && get_key(i) >= key)
+            {
                 assert(get_key(i) != key); // key not duplicate
 
                 // move (key_i, child_{i+1}) to right position
-                get_key(i+1) = get_key(i);
-                get_child(i+2) = get_child(i+1);
+                get_key(i + 1) = get_key(i);
+                get_child(i + 2) = get_child(i + 1);
                 i -= 1;
             }
 
@@ -446,10 +532,10 @@ struct InternalNode : BtreeNode {
             // insert (left, key, right) to (c0, k0, c1, k1)
             // -> (c0, key, right, k0, c1, k1)
             // i == -1 or get_key(i) < key
-            get_key(i+1) = key;
-            get_child(i+2) = right;
+            get_key(i + 1) = key;
+            get_child(i + 2) = right;
 
-            assert(get_child(i+1) == left);
+            assert(get_child(i + 1) == left);
         }
     }
 
@@ -464,7 +550,8 @@ struct InternalNode : BtreeNode {
      * @param new_page
      * @return uint32_t
      */
-    uint32_t insert_and_split(uint32_t key, uint64_t left, uint64_t right, void * new_page) {
+    uint32_t insert_and_split(uint32_t key, uint64_t left, uint64_t right, void * new_page)
+    {
         // interprete new page as a new inner node
         InternalNode rightNode(new_page, true);
 
@@ -486,7 +573,8 @@ struct InternalNode : BtreeNode {
         // for each move only (key, rightchild) is moved
         int left_load = n / 2 + 1, right_load = n / 2;
         int pivot_pos = n / 2; // at left_node
-        for (int i=n-1; i >=0; --i) {
+        for (int i = n - 1; i >= 0; --i)
+        {
             // if i < key_pos it shall locate at i
             // if i >= key_pos its location becomes i+1
             // since key_pos shall occupied by the new key
@@ -495,46 +583,52 @@ struct InternalNode : BtreeNode {
             // insert to left node with new id: idx
             // when idx == pivot_pos, its rchild shall
             // move to the start pos of right child
-            if (idx == pivot_pos) {
+            if (idx == pivot_pos)
+            {
                 // move right child
-                rightNode.get_child(0) = get_child(i+1);
+                rightNode.get_child(0) = get_child(i + 1);
 
                 // when idx == i+1 one shall move its key
-                if (idx != i) {
+                if (idx != i)
                     get_key(idx) = get_key(i);
-                }
-
-            } else if (idx < left_load) {
+            }
+            else if (idx < left_load)
+            {
                 // idx == i + 1, move key and rightchild
-                if (i != idx) {
+                if (i != idx)
+                {
                     get_key(idx) = get_key(i);
-                    get_child(idx+1) = get_child(i+1);
+                    get_child(idx + 1) = get_child(i + 1);
                 }
 
-            // insert to right node
-            } else {
-                rightNode.get_key(idx-left_load) = get_key(i);
-                rightNode.get_child(idx-left_load+1) = get_child(i+1);
+                // insert to right node
+            }
+            else
+            {
+                rightNode.get_key(idx - left_load) = get_key(i);
+                rightNode.get_child(idx - left_load + 1) = get_child(i + 1);
             }
         }
 
         // insert new key to key_pos
         // special case: key_pos is pivot
-        if (key_pos < left_load) {
+        if (key_pos < left_load)
+        {
             get_key(key_pos) = key;
 
-            if (key_pos == pivot_pos) {
+            if (key_pos == pivot_pos)
                 rightNode.get_child(0) = right;
-            } else {
-                get_child(key_pos+1) = right;
-            }
+            else
+                get_child(key_pos + 1) = right;
 
             // assert left
             assert(get_child(key_pos) == left);
-        } else {
+        }
+        else
+        {
             rightNode.get_key(key_pos - left_load) = key;
             rightNode.get_child(key_pos - left_load + 1) = right;
-            assert(rightNode.get_child(key_pos-left_load) == left);
+            assert(rightNode.get_child(key_pos - left_load) == left);
         }
 
         // remove tail elements of current node
@@ -555,48 +649,86 @@ struct InternalNode : BtreeNode {
      * @return false: search failed, duplicate found. in this
      *  circumstoms pos is set to the index of key
      */
-    bool search_insert_location(uint32_t key, int & pos) {
-        int start = 0, end = num_keys() - 1;
-        while (start <= end) {
-            int mid = start + (end-start) / 2;
-            uint32_t key_mid = get_key(mid);
+    bool search_insert_location(uint32_t key, int & pos)
+    {
+        // int start = 0, end = num_keys() - 1;
+        // while (start <= end)
+        // {
+        //     int mid = start + (end - start) / 2;
+        //     uint32_t key_mid = get_key(mid);
 
-            if (key_mid == key) {
-                pos = mid;
-                // duplicated key
-                return false;
+        //     if (key_mid == key)
+        //     {
+        //         pos = mid;
+        //         // duplicated key
+        //         return false;
 
-            // key[start .. mid] < key
-            } else if (key_mid < key) {
-                start = mid + 1;
+        //         // key[start .. mid] < key
+        //     }
+        //     else if (key_mid < key)
+        //     {
+        //         start = mid + 1;
 
-            // key < key_mid
-            } else {
-                end = mid - 1;
-            }
-        }
+        //         // key < key_mid
+        //     }
+        //     else
+        //     {
+        //         end = mid - 1;
+        //     }
+        // }
 
-        // success start > end
-        // key shall inserted as follow:
-        // end _   start
-        // _   key _
-        assert(start == end + 1);
-        pos = start;
+        // // success start > end
+        // // key shall inserted as follow:
+        // // end _   start
+        // // _   key _
+        // assert(start == end + 1);
+        // pos = start;
+        pos = search_key_position(key);
+        if (pos >= 0 && get_key(pos) == key)
+            return false;
 
+        pos += 1;
         return true;
     }
 
-    bool isFull() {
-        return num_keys() == num_max_keys;
-    }
+    virtual bool isFull() override { return num_keys() == num_max_keys; }
 
-    void print_node() {
+    // max_num_keys: 338
+    void print_node()
+    {
         printf("inner node (size %d)\n", num_keys());
-        for (uint32_t i = 0; i < num_keys(); i++) {
+        for (uint32_t i = 0; i < num_keys(); i++)
+        {
             uint64_t child = get_child(i);
             uint32_t key = get_key(i);
             printf("%lld <= %d < ", child, key);
         }
         printf("%lld\n", get_child(num_keys()));
     }
+};
+
+/**
+ * @brief design for B+ tree
+ * Pager: sync from memory and disk, set and get root id
+ * leaf_load and inner_node_load
+ * insert()
+ */
+class BPlusTree
+{
+public:
+    BPlusTree(const std::string & path, char mode, uint32_t row_size, uint32_t leaf_node_load = 10, uint32_t inner_node_load = 10);
+
+    uint64_t get_root_page() const;
+    uint64_t get_total_page() const;
+    // void visit_rows(std::function<Row*()> handler);
+    // const Row* find(uint32_t key) const;
+    void insert(uint32_t, Row * rows);
+    const uint32_t row_size;
+
+private:
+    BTreePager pager;
+    uint32_t leaf_load;
+    uint32_t inner_node_load;
+    void * root_page;
+    std::unique_ptr<BtreeNode> root;
 };
