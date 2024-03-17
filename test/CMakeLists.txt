@@ -23,6 +23,7 @@ target_include_directories(
     lib/googletest/googletest/include
     ../src
 )
+target_compile_features(hello_test PRIVATE cxx_std_17)
 
 include(GoogleTest)
 gtest_discover_tests(hello_test)

@@ -10,4 +10,5 @@ add_executable(dbtoy main.cpp)
 
 target_link_libraries(dbtoy core)
 target_include_directories(dbtoy PUBLIC ${PROJECT_SOURCE_DIR})
+target_compile_features(dbtoy PRIVATE cxx_std_17)
 # target_include_directories(dbtoy PUBLIC "./command")

@@ -74,9 +74,7 @@ public:
     virtual void flush_page(int page_id, size_t size = PAGE_SIZE) override;
     uint64_t allocate_page(void *& new_page);
     inline uint64_t num_pages() const { return metaData->num_pages; }
-
     inline uint64_t get_root_page() const { return metaData->root_pid; }
-
     inline void set_root_page(uint64_t page_id) { metaData->root_pid = page_id; }
 
 private:

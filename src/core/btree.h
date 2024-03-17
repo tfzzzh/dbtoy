@@ -4,7 +4,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <_types/_uint32_t.h>
 #include <_types/_uint64_t.h>
@@ -27,22 +29,12 @@ const uint32_t PARENT_POINTER_SIZE = sizeof(uint64_t);
 const uint32_t PARENT_POINTER_OFFSET = IS_ROOT_OFFSET + IS_ROOT_SIZE;
 const uint32_t COMMON_NODE_HEADER_SIZE = NODE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_POINTER_SIZE;
 const uint64_t NODE_PARENT_INVALID = ULONG_LONG_MAX;
+const uint8_t NODE_TYPE_INNER = 0;
+const uint8_t NODE_TYPE_LEAF = 1;
 
 struct BtreeNode
 {
     void * data; // pointer to a page
-
-    BtreeNode(void * page) : data(page)
-    {
-        // the page shall known
-        // data = malloc(PAGE_SIZE);
-
-        // one shall not change *page when it is the only parameter of
-        // constructor
-        // defaultly the node is not a root node
-        // set_root(false);
-        // parent() = NODE_PARENT_INVALID;
-    }
 
     virtual const uint8_t & node_type() const
     {
@@ -114,6 +106,7 @@ struct BtreeNode
             if (get_key(i) == get_key(i + 1))
                 return true;
 
+
         return false;
     }
 
@@ -123,9 +116,23 @@ struct BtreeNode
         const uint8_t & value = *((uint8_t *)((char *)page + NODE_TYPE_OFFSET));
         return value;
     }
-    // virtual ~BtreeNode() {
-    //     free(data);
-    // }
+
+    // factory function to genrate node according to content in page
+    static std::unique_ptr<BtreeNode> LoadNodeFrom(void * page);
+
+protected:
+    // constructor shall not be called
+    BtreeNode(void * page) : data(page)
+    {
+        // the page shall known
+        // data = malloc(PAGE_SIZE);
+
+        // one shall not change *page when it is the only parameter of
+        // constructor
+        // defaultly the node is not a root node
+        // set_root(false);
+        // parent() = NODE_PARENT_INVALID;
+    }
 };
 
 /**
@@ -147,9 +154,6 @@ const uint32_t LEAF_NODE_KEY_SIZE = sizeof(uint32_t);
 const uint32_t LEAF_NODE_KEY_OFFSET = 0;
 const uint32_t LEAF_NODE_VALUE_OFFSET = LEAF_NODE_KEY_OFFSET + LEAF_NODE_KEY_SIZE;
 const uint32_t LEAF_NODE_SPACE_FOR_CELLS = PAGE_SIZE - LEAF_NODE_HEADER_SIZE;
-
-const uint8_t NODE_TYPE_INNER = 0;
-const uint8_t NODE_TYPE_LEAF = 1;
 
 
 /**
@@ -352,12 +356,12 @@ struct LeafNode : public BtreeNode
         // insert key_pos
         if (key_pos < left_load)
         {
-            get_key(key_pos) = key_pos;
+            get_key(key_pos) = key;
             value->serialize(get_value(key_pos));
         }
         else
         {
-            rightNode.get_key(key_pos - left_load) = key_pos;
+            rightNode.get_key(key_pos - left_load) = key;
             value->serialize(rightNode.get_value(key_pos - left_load));
         }
 
@@ -516,7 +520,7 @@ struct InternalNode : public BtreeNode
         }
         else
         {
-            printf("key=%d\n", key);
+            // printf("key=%d\n", key);
             int i = n - 1;
             while (i >= 0 && get_key(i) >= key)
             {
@@ -707,8 +711,27 @@ struct InternalNode : public BtreeNode
     }
 };
 
+struct KeyLocation
+{
+    // page id which should contains the key
+    uint64_t page_id;
+
+    // if key exist row id is the cell id of the key
+    // else row_id is the place to insert the key
+    int row_id;
+
+    // is key exist on current tree
+    bool is_exist;
+
+    // KeyLocation(uint64_t page_id) : page_id(page_id), row_id() { }
+    KeyLocation(uint64_t page_id, uint32_t row_id, bool is_exist) : page_id(page_id), row_id(row_id), is_exist(is_exist) { }
+};
+
+// class for test
+struct NaryTree;
 /**
- * @brief design for B+ tree
+ * @brief B+Tree
+ * protocal: for each inner node max(child_i) <= key_i < min(child_(i+1))
  * Pager: sync from memory and disk, set and get root id
  * leaf_load and inner_node_load
  * insert()
@@ -722,13 +745,41 @@ public:
     uint64_t get_total_page() const;
     // void visit_rows(std::function<Row*()> handler);
     // const Row* find(uint32_t key) const;
-    void insert(uint32_t, Row * rows);
+    enum class InsertStatus;
+    InsertStatus insert(uint32_t, Row * rows);
+    KeyLocation find(uint32_t key);
+    void print_keys();
+
+
+    // public properties
+public:
     const uint32_t row_size;
 
+    // public embeded structures
+public:
+    enum class InsertStatus
+    {
+        SUCCESS,
+        FAIL_DUPLICATE_KEY
+    };
+
 private:
+    void update_root(uint64_t page_id);
+    void link_to(uint64_t child, uint64_t parent);
+    std::unique_ptr<BtreeNode> get_node_by(uint64_t page_id) { return BtreeNode::LoadNodeFrom(pager.get_page(page_id)); }
+    void post_order_visit(
+        uint64_t page_id,
+        std::function<void(uint64_t)> inner_node_action,
+        std::function<void(void *)> leaf_cell_action,
+        uint32_t min_key,
+        uint32_t max_key);
+    // check valid
+
     BTreePager pager;
     uint32_t leaf_load;
     uint32_t inner_node_load;
     void * root_page;
     std::unique_ptr<BtreeNode> root;
+
+    friend struct NaryTree;
 };

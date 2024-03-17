@@ -11,10 +11,12 @@ set(
     "row.cpp"
     "table.cpp"
     "dbfile.cpp"
+    "btree.cpp"
 )
 
 add_library(core SHARED STATIC ${CORE_SOURCE_FILES})
 target_include_directories(core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(core PRIVATE cxx_std_17)
 
 # add_library(row SHARED STATIC "row.cpp")
 # target_include_directories(row PRIVATE "./")
