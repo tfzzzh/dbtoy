@@ -1,8 +1,12 @@
 #include <row.h>
 #include <table.h>
 #include <command.h>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include "btree.h"
+#include "global_variables.h"
+
 using std::cin;
 using std::cout;
 using std::endl;
@@ -22,6 +26,24 @@ ExecuteResult * Select::evaluate() {
         row.deserialize(src);
 
         // print row
+        std::cout << row.to_string() << std::endl;
+    }
+
+    return new ExecuteResult(ExecuteStatus::EXECUTE_SUCCESS);
+}
+
+ExecuteResult * SelectUsingBtree::evaluate()
+{
+    auto & handler = GlobalVariableHandler::get_instance();
+    auto & btree = handler.get_btree();
+    auto results = btree.select_cell(0, UINT32_MAX);
+    if (results.size() == 0)
+        std::cout << "no entries found" << endl;
+
+    UserInfo row;
+    for(void * cell: results)
+    {
+        row.deserialize(LeafNode::extract_value(cell));
         std::cout << row.to_string() << std::endl;
     }
 
@@ -53,16 +75,31 @@ ExecuteResult * Insert::evaluate() {
     }
 }
 
+ExecuteResult * InsertToBtree::evaluate() {
+    auto & handler = GlobalVariableHandler::get_instance();
+    auto & btree = handler.get_btree();
+
+    auto status = btree.insert(row_to_insert->get_primary_key(), row_to_insert);
+
+    if (status == BPlusTree::InsertStatus::SUCCESS)
+        return new ExecuteResult(ExecuteStatus::EXECUTE_SUCCESS);
+    else if (status == BPlusTree::InsertStatus::FAIL_DUPLICATE_KEY)
+        return new ExecuteResult(ExecuteStatus::DUPLICATE_KEY);
+
+    return new ExecuteResult(ExecuteStatus::EXECUTE_FAIL);
+}
+
+
 Command * parse(const std::string & cmd) {
     if (cmd == ".exit") {
         return new Exit();
 
     } else if (cmd == "select") {
-        return new Select();
+        return new SelectUsingBtree();
 
     // insert 1 cstack foo@bar.com
     } else if (cmd.substr(0, 6) == "insert") {
-        return new Insert(cmd.substr(6, cmd.size() - 6));
+        return new InsertToBtree(cmd.substr(6, cmd.size() - 6));
 
     } else {
         std::cout << "Unrecognized command '" << cmd << "'." << std::endl;

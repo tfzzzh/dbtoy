@@ -6,27 +6,28 @@ add_subdirectory(lib/googletest)
 enable_testing()
 
 add_executable(
-  hello_test
+  db_test
   "src/start_tests.cpp"
   "src/btree_node_tests.cpp"
   "src/btreepager_tests.cpp"
+  "src/btree_logic_tests.cpp"
 )
 target_link_libraries(
-  hello_test
+  db_test
   GTest::gtest_main
   core
 )
 
 target_include_directories(
-    hello_test
+    db_test
     PRIVATE
     lib/googletest/googletest/include
     ../src
 )
-target_compile_features(hello_test PRIVATE cxx_std_17)
+target_compile_features(db_test PRIVATE cxx_std_17)
 
 include(GoogleTest)
-gtest_discover_tests(hello_test)
+gtest_discover_tests(db_test)
 
 # include_directories(${DIVISION_HEADERS_DIR})
 # include_directories(lib/googletest/googletest/include)

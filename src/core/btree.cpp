@@ -1,5 +1,7 @@
 #include "btree.h"
 #include <cassert>
+#include <cstdint>
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <queue>
@@ -110,7 +112,7 @@ BPlusTree::InsertStatus BPlusTree::insert(uint32_t key, Row * row)
     void * new_page = nullptr;
     auto new_page_id = pager.allocate_page(new_page);
     auto key_upward = leaf.insert_and_split(key, row, new_page);
-    auto tmp = get_node_by(new_page_id);
+    // auto tmp = get_node_by(new_page_id);
 
     // post the overflow on inner node
     // now one shall insert (key_upward, left, right) to its parent node
@@ -139,6 +141,7 @@ BPlusTree::InsertStatus BPlusTree::insert(uint32_t key, Row * row)
         {
             new_page = nullptr;
             new_page_id = pager.allocate_page(new_page);
+            // when inner node splits, the parent link shall move too
             auto pivot = parentNode.insert_and_split(key_upward, left, right, new_page);
             if (key_upward < pivot)
             {
@@ -157,6 +160,15 @@ BPlusTree::InsertStatus BPlusTree::insert(uint32_t key, Row * row)
                 link_to(right, new_page_id);
             }
 
+            // reconfigure link of right page
+            auto newRightNode = get_node_by(new_page_id);
+            InternalNode* newRightNodeHandler = dynamic_cast<InternalNode*>(newRightNode.get());
+            for (int r=0; r <= newRightNodeHandler->num_keys(); ++r)
+            {
+                auto child = get_node_by(newRightNodeHandler->get_child(r));
+                child->parent() = new_page_id;
+            }
+
             key_upward = pivot;
             left = parent;
             right = new_page_id;
@@ -169,6 +181,7 @@ BPlusTree::InsertStatus BPlusTree::insert(uint32_t key, Row * row)
     // root overflow and upsert (key_upward, left, right)
     if (!jobDone)
     {
+        // assert()
         // new an empty root node
         new_page = nullptr;
         new_page_id = pager.allocate_page(new_page);
@@ -277,9 +290,11 @@ void BPlusTree::print_keys()
     }
 }
 
+
 void BPlusTree::post_order_visit(
     uint64_t page_id,
     std::function<void(uint64_t)> inner_node_action,
+    std::function<void(uint64_t)> leaf_node_action,
     std::function<void(void *)> leaf_cell_action,
     uint32_t min_key,
     uint32_t max_key)
@@ -310,7 +325,7 @@ void BPlusTree::post_order_visit(
         // visit child node
         InternalNode * ptr = dynamic_cast<InternalNode *>(node.get());
         for (int k = i; k <= j + 1; ++k)
-            post_order_visit(ptr->get_child(k), inner_node_action, leaf_cell_action, min_key, max_key);
+            post_order_visit(ptr->get_child(k), inner_node_action, leaf_node_action, leaf_cell_action, min_key, max_key);
 
         // visit current node
         if (inner_node_action != nullptr)
@@ -331,5 +346,74 @@ void BPlusTree::post_order_visit(
                     leaf_cell_action(ptr->get_cell(k));
             }
         }
+
+        if (leaf_node_action != nullptr)
+            leaf_node_action(page_id);
     }
+}
+
+bool BPlusTree::check_valid()
+{
+    // keys hall increasing in all nodes
+    // if current node is root its root bit must be set, its parent is invalid
+    // if current node is not root it root bit must unset, its loading shall >= 50%
+    // if current node is internal, its childs's parents shall correctly set
+    // if current node is internal, its
+    // if current node is internal, max(lef_child) <= key < min(right_child)
+    // return true;
+    bool is_valid = true;
+    std::function<void(uint64_t)> inner_node_checker = [this, &is_valid](uint64_t page_id)
+    {
+        // cout << page_id << endl;
+        if (!is_valid) return;
+        auto ptr = BtreeNode::LoadNodeFrom(pager.get_page(page_id));
+        if (page_id == pager.get_root_page())
+            is_valid = is_valid && (ptr->is_root()) && ptr->parent() == NODE_PARENT_INVALID;
+        else
+            is_valid = is_valid && (!ptr->is_root()) && ptr->parent() != NODE_PARENT_INVALID;
+
+        if (!is_valid){
+            cout << "root not correctly set" << endl;
+            throw std::runtime_error("root not correctly set");
+        }
+
+        if (!ptr->is_root())
+            is_valid = is_valid && ptr->get_num_keys() * 2 >= this->inner_node_load;
+        is_valid = is_valid && ptr->is_key_monotonic_increasing();
+        if (!is_valid) throw std::runtime_error("load or key increasing not satisfied");
+
+        auto inner_ptr = (InternalNode *) ptr.get();
+        for (uint32_t i=0; i < inner_ptr->get_num_keys(); ++i)
+        {
+            uint32_t key = inner_ptr->get_key(i);
+            auto lchild = BtreeNode::LoadNodeFrom(pager.get_page(inner_ptr->get_child(i)));
+            auto rchild = BtreeNode::LoadNodeFrom(pager.get_page(inner_ptr->get_child(i+1)));
+
+            is_valid = is_valid && lchild->parent() == page_id;
+            is_valid = is_valid && rchild->parent() == page_id;
+            if (!is_valid) {
+                cout << "left parent: " << lchild->parent() << " right parent" << rchild->parent() << " real " << page_id << endl;
+                throw std::runtime_error("parent and child not correctly linked");
+            }
+
+            is_valid = is_valid && lchild->get_key(lchild->get_num_keys()-1) <= key;
+            is_valid = is_valid && key < rchild->get_key(0);
+
+            if (!is_valid) throw std::runtime_error("left child <= key < right child invalidate");
+        }
+
+        if (!is_valid) throw std::runtime_error("node is not valid");
+    };
+
+    // cout << pager.get_root_page() << endl;
+    post_order_visit(pager.get_root_page(), inner_node_checker, nullptr, nullptr, 0, UINT32_MAX);
+    return is_valid;
+}
+
+std::vector<void *> BPlusTree::select_cell(uint32_t min_val, uint32_t max_val)
+{
+    vector<void *> result;
+    function<void(void *)> leaf_cell_action = [&result](void * cell) { result.push_back(cell); };
+    post_order_visit(pager.get_root_page(), nullptr, nullptr, leaf_cell_action, min_val, max_val);
+    return result;
 }

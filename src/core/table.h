@@ -1,10 +1,10 @@
 #pragma once
+#include <cassert>
 #include <cstddef>
 #include <cstdlib>
-#include <cassert>
 #include <string>
-#include "parameters.h"
 #include "dbfile.h"
+#include "parameters.h"
 
 // const size_t PAGE_SIZE = 4096;
 // const size_t TABLE_MAX_PAGES = 100;
@@ -13,19 +13,19 @@
  * @brief memory to store rows of a table
  *
  */
-class Table {
+class Table
+{
 public:
     Table(size_t rsize, const std::string & file_path);
     ~Table();
 
-    size_t get_row_per_page() const {
+    size_t get_row_per_page() const
+    {
         assert(row_size > 0);
         return PAGE_SIZE / row_size;
     }
 
-    size_t get_max_rows() const {
-        return TABLE_MAX_PAGES * get_row_per_page();
-    }
+    size_t get_max_rows() const { return TABLE_MAX_PAGES * get_row_per_page(); }
 
     // size_t get_num_rows() const {
     //     return num_rows;
@@ -47,9 +47,11 @@ private:
     size_t row_size;
 };
 
-class TableBuffer {
+class TableBuffer
+{
 public:
-    static Table & get_instance() {
+    static Table & get_instance()
+    {
         static Table table(TableBuffer::row_size, path);
         return table;
     }

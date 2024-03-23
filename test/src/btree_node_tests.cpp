@@ -1,10 +1,8 @@
 #include <string>
 #include <vector>
-#include <_types/_uint32_t.h>
 #include <core/btree.h>
 #include <core/row.h>
 #include <gtest/gtest.h>
-#include <malloc/_malloc.h>
 #include "core/parameters.h"
 
 TEST(btree_node, use_leaf_node)

@@ -12,6 +12,7 @@ set(
     "table.cpp"
     "dbfile.cpp"
     "btree.cpp"
+    "global_variables.cpp"
 )
 
 add_library(core SHARED STATIC ${CORE_SOURCE_FILES})

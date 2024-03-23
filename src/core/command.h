@@ -2,54 +2,77 @@
 #include <string>
 #include "row.h"
 
-enum class ExecuteStatus {
+enum class ExecuteStatus
+{
     EXECUTE_SUCCESS,
     EXECUTE_FAIL,
+    DUPLICATE_KEY,
     TABLE_FULL
 };
 
-struct ExecuteResult {
+struct ExecuteResult
+{
     ExecuteStatus status;
     void * data;
 
-    ExecuteResult(ExecuteStatus status, void * data=nullptr):
-        status(status), data(data) {}
+    ExecuteResult(ExecuteStatus status, void * data = nullptr) : status(status), data(data) { }
 };
 
-class Command {
+class Command
+{
 public:
     virtual ExecuteResult * evaluate() = 0;
-    virtual ~Command() {};
+    virtual ~Command(){};
 };
 
 
-class MetaCommand : public Command {};
+class MetaCommand : public Command
+{
+};
 
 
-class Exit: public MetaCommand {
+class Exit : public MetaCommand
+{
 public:
     virtual ExecuteResult * evaluate() override;
 };
 
 
-class Statement : public Command {};
+class Statement : public Command
+{
+};
 
 
-class Select : public Statement {
+class Select : public Statement
+{
 public:
     virtual ExecuteResult * evaluate();
 };
 
+class SelectUsingBtree : public Select
+{
+public:
+    virtual ExecuteResult * evaluate() override;
+};
 
-class Insert : public Statement {
+
+class Insert : public Statement
+{
 public:
     Insert(const std::string & payload);
     virtual ~Insert();
     virtual ExecuteResult * evaluate();
 
-private:
+protected:
     Row * row_to_insert;
 };
 
+class InsertToBtree : public Insert
+{
+public:
+    InsertToBtree(const std::string & payload) : Insert(payload) { }
+    virtual ~InsertToBtree() override {};
+    virtual ExecuteResult * evaluate() override;
+};
 
 Command * parse(const std::string & cmd);

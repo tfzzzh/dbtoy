@@ -1,3 +1,4 @@
+#pragma once
 #include <cassert>
 #include <climits>
 #include <cstdio>
@@ -8,9 +9,6 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
-#include <_types/_uint32_t.h>
-#include <_types/_uint64_t.h>
-#include <sys/_types/_int64_t.h>
 #include "dbfile.h"
 #include "parameters.h"
 #include "row.h"
@@ -108,6 +106,24 @@ struct BtreeNode
 
 
         return false;
+    }
+
+    // check if keys in this node is monotonic increasing
+    virtual bool is_key_monotonic_increasing() {
+        if (get_num_keys() <= 1) return true;
+        for (uint32_t i = 0; i + 1 < get_num_keys(); ++i)
+            if (get_key(i) >= get_key(i+1)) return false;
+
+        return true;
+    }
+
+    // check if the load requirment is satisfied, root is defaultly satified
+    // this condition
+    virtual bool is_half_loaded()
+    {
+        if (is_root()) return true;
+
+        return get_num_keys() * 2 >= get_node_load();
     }
 
     // static functions
@@ -743,13 +759,17 @@ public:
 
     uint64_t get_root_page() const;
     uint64_t get_total_page() const;
-    // void visit_rows(std::function<Row*()> handler);
-    // const Row* find(uint32_t key) const;
+
     enum class InsertStatus;
     InsertStatus insert(uint32_t, Row * rows);
+
     KeyLocation find(uint32_t key);
+
+    std::vector<void *> select_cell(uint32_t min_val, uint32_t max_val);
     void print_keys();
 
+    // check if the bplus tree has valid structure,
+    bool check_valid();
 
     // public properties
 public:
@@ -770,6 +790,7 @@ private:
     void post_order_visit(
         uint64_t page_id,
         std::function<void(uint64_t)> inner_node_action,
+        std::function<void(uint64_t)> leaf_node_action,
         std::function<void(void *)> leaf_cell_action,
         uint32_t min_key,
         uint32_t max_key);
